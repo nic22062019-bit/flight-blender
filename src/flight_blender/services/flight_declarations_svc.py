@@ -667,6 +667,44 @@ class FlightDeclarationOperations:
                 )
             }, 409
 
+        # --- ИСПРАВЛЕНИЕ (2026-10-04): задача в очередь не ставилась --------
+        #
+        # Здесь заканчивалась функция с единственным return 200. Из-за этого
+        # ручка /flight_declaration/{pk}/submit_to_dss отвечала
+        # «DSS submission initiated», НО в Celery ничего не попадало, и в DSS
+        # объявление не появлялось (проверено: op_int_refs = []).
+        # Это баг OpenUTM issue #217, воспроизведённый на нашем форке.
+        #
+        # Что делаем: ПОСЛЕ всех проверок (USSP включён, объявление найдено,
+        # state == 0) ставим Celery-таску, которая уже существует в
+        # tasks/flight_declarations_task.py и делает реальную работу через
+        # DSSOperationalIntentsCreator. Саму заглушку не переписываем —
+        # сохранена исходная логика ответа (400/404/409).
+        try:
+            from flight_blender.tasks.flight_declarations_task import (
+                submit_flight_declaration_to_dss_async,
+            )
+
+            task = submit_flight_declaration_to_dss_async.delay(
+                str(flight_declaration.id)
+            )
+            logger.info(
+                "Queued DSS submission for flight declaration %s (celery task %s)",
+                flight_declaration.id, getattr(task, "id", "?"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Честно сообщаем о сбое: раньше здесь просто возвращался 200,
+            # и поломка постановки в очередь была невидима.
+            logger.error(
+                "Failed to queue DSS submission for %s: %s",
+                flight_declaration.id, exc,
+            )
+            return {
+                "message": "DSS submission could not be queued",
+                "error": str(exc)[:200],
+                "id": str(flight_declaration.id),
+            }, 500
+
         return {"message": "DSS submission initiated.", "id": str(flight_declaration.id)}, 200
 
     async def set_operational_intent(self, request_data: dict) -> tuple[dict, int]:
