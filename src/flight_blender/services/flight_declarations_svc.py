@@ -351,22 +351,79 @@ def _validate_dates(start_datetime: str, end_datetime: str) -> tuple[bool, str |
     return True, None
 
 
+def _polygon_vertices(geometry: Any) -> list[dict[str, float]]:
+    """GeoJSON Polygon/MultiPolygon -> [{lat, lng}] для SCDPolygon.
+
+    DSS (types.gen.go: Polygon.Vertices) ждёт список точек с полями
+    lat/lng, а FB раньше клал в outline_polygon сырую GeoJSON-геометрию —
+    то есть структура не совпадала ещё и по геометрии, а не только по
+    вложенности.
+    """
+    if not isinstance(geometry, dict):
+        return []
+    coords = geometry.get("coordinates") or []
+    # MultiPolygon: координаты уровнем глубже.
+    if geometry.get("type") == "MultiPolygon" and coords:
+        coords = coords[0] if coords[0] else []
+    ring = coords[0] if coords and isinstance(coords[0], list) else []
+    out: list[dict[str, float]] = []
+    for pt in ring:
+        if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+            out.append({"lat": float(pt[1]), "lng": float(pt[0])})
+    return out
+
+
 def _build_partial_operational_intent(request_data: dict) -> tuple[dict, str]:
     geometries = [shape(feature["geometry"]) for feature in request_data["flight_declaration_geo_json"].get("features", [])]
     unioned = unary_union(geometries)
     min_lng, min_lat, max_lng, max_lat = unioned.bounds
     bounds = ",".join(str(v) for v in (min_lng, min_lat, max_lng, max_lat))
 
+    # --- ИСПРАВЛЕНИЕ (2026-10-04): вложенная структура SCDVolume4D ---------
+    #
+    # Раньше объём строился плоским: outline_polygon/altitude_* на верхнем
+    # уровне плюс time_start/time_end строками. Но dacite разбирает результат
+    # по models FlightDeclarationOperationalIntentStorageDetails
+    # (domain_types/scd.py:718), где тpeбуется SCDVolume4D:
+    #
+    #     SCDVolume4D
+    #       volume: SCDVolume3D            <- ОБЯЗАТЕЛЬНОЕ поле, объект
+    #         outline_polygon: SCDPolygon
+    #         altitude_lower / altitude_upper: SCDAltitude
+    #       time_start: SCDTime | None    <- объект {value, format}
+    #       time_end:   SCDTime | None
+    #
+    # Из-за плоской формы воркер падал с
+    # MissingValueError: missing value for field "volumes.volume".
+    # Дефект был скрыт: раньше цепочка обрывалась на заглушке submit_to_dss
+    # и до воркера дело не доходило.
+    #
+    # Время передаётся объектом SCDTime (RFC3339 + формат), а не строкой.
+    def _scd_time(value: str) -> dict[str, str]:
+        return {"value": value, "format": "RFC3339"}
+
     volumes: list[dict[str, Any]] = []
     for feature in request_data["flight_declaration_geo_json"].get("features", []):
         props = feature.get("properties", {})
         volumes.append(
             {
-                "outline_polygon": feature.get("geometry"),
-                "altitude_lower": props.get("min_altitude"),
-                "altitude_upper": props.get("max_altitude"),
-                "time_start": request_data["start_datetime"],
-                "time_end": request_data["end_datetime"],
+                "volume": {
+                    "outline_polygon": {
+                        "vertices": _polygon_vertices(feature.get("geometry"))
+                    },
+                    "altitude_lower": {
+                        "value": props.get("min_altitude"),
+                        "reference": "W84",
+                        "units": "M",
+                    },
+                    "altitude_upper": {
+                        "value": props.get("max_altitude"),
+                        "reference": "W84",
+                        "units": "M",
+                    },
+                },
+                "time_start": _scd_time(request_data["start_datetime"]),
+                "time_end": _scd_time(request_data["end_datetime"]),
             }
         )
 
