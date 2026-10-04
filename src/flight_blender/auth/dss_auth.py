@@ -1,4 +1,6 @@
+import base64
 import json
+import time
 from datetime import datetime, timedelta
 
 import httpx
@@ -6,6 +8,36 @@ from loguru import logger
 
 from flight_blender.auth.token_cache import get_async_redis
 from flight_blender.config import settings
+
+
+def _jwt_exp_seconds_ago_is_negative(token: str) -> float | None:
+    """Возвращает exp-время JWT в UNIX-секундах, либо None если не читается."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload.encode()))
+    except (ValueError, TypeError):
+        return None
+    exp = claims.get("exp")
+    return float(exp) if isinstance(exp, (int, float)) else None
+
+
+def _token_is_fresh(token: str, *, leeway_s: float = 30.0) -> bool:
+    """Токен считается годным, пока не истёк его собственный exp.
+
+    leeway_s — запас на сетевые задержки и расхождение часов контейнера
+    с Keycloak: за 30 с до истечения токен уже не берём.
+    Пустой/нечитаемый токен = негодный (тогда код обновит кэш).
+    """
+    if not token:
+        return False
+    exp = _jwt_exp_seconds_ago_is_negative(token)
+    if exp is None:
+        return False
+    return time.time() < (exp - leeway_s)
 
 
 class AuthorityCredentialsGetter:
@@ -51,10 +83,18 @@ class AuthorityCredentialsGetter:
 
         if token_details:
             token_details = json.loads(token_details)
-            created_at = token_details["created_at"]
-            set_date = datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%S.%f")
-            if self.now < (set_date + timedelta(minutes=58)):
-                return token_details["credentials"]
+            creds = token_details.get("credentials") or {}
+            # ИСТОЧНИК ИСТИНЫ = exp из JWT, а не константа.
+            #
+            # Раньше здесь стояло `self.now < set_date + timedelta(minutes=58)`,
+            # но наш Keycloak выдаёт access_token на 600 с (10 мин) — см.
+            # access_token_sss_lifetime в realm utm. Кэш считал токен годным
+            # почти час и отдавал заведомо просроченный: DSS отвечал 401
+            # "token is expired by 12m35s". Проверять надо по РЕАЛЬНОМУ
+            # времени жизни токена, а не по предположению о нём.
+            if _token_is_fresh(creds.get("access_token", "")):
+                return creds
+            logger.info("Cached DSS token expired or unreadable; requesting a new one.")
 
         credentials = await self._get_credentials(audience, token_type)
         await self._cache_credentials(cache_key, credentials)

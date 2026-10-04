@@ -370,7 +370,33 @@ def _polygon_vertices(geometry: Any) -> list[dict[str, float]]:
     for pt in ring:
         if isinstance(pt, (list, tuple)) and len(pt) >= 2:
             out.append({"lat": float(pt[1]), "lng": float(pt[0])})
-    return out
+    return _strip_closing_vertex(out)
+
+
+def _strip_closing_vertex(vertices: list[dict[str, float]]) -> list[dict[str, float]]:
+    """Убирает замыкающую (повторяющуюся) вершину кольца.
+
+    GeoJSON (RFC 7946) ТРЕБУЕТ, чтобы первая и последняя позиции совпадали:
+    без этого валидного многоугольника не существует. А DSS так не хочет.
+
+    InterUSS-разбиратели (dss pkg/geo/s2.go::validateLoop) считают, что
+    ребро между последней и первой вершиной существует само по себе, и
+    проверяют пересечения рёбер попарно. Если вершина задвоена, ребро
+    "предпоследняя -> последняя" приходит в ту же точку, что и ребро
+    "первая -> вторая", и DSS отвечает
+
+        400 Intersection found between polygon edge 0 and 3
+
+    Это НЕ ошибка геометрии объявления — это ошибка перевода форматов.
+    Поэтому кольцо закрываем ровно один раз: последнюю точку отбрасываем,
+    если она совпадает с первой (с точностью до 1e-12 градуса).
+    """
+    if len(vertices) < 2:
+        return vertices
+    first, last = vertices[0], vertices[-1]
+    if abs(first["lat"] - last["lat"]) < 1e-12 and abs(first["lng"] - last["lng"]) < 1e-12:
+        return vertices[:-1]
+    return vertices
 
 
 def _build_partial_operational_intent(request_data: dict) -> tuple[dict, str]:
@@ -1177,6 +1203,14 @@ async def submit_flight_declaration_to_dss(flight_declaration_id: str, fd_repo: 
     my_dss_opint_creator = DSSOperationalIntentsCreator(
         flight_declaration_id=uuid.UUID(flight_declaration_id),
         fd_repo=fd_repo,
+        # OperationalIntentsConverter обязателен: без него атрибут
+        # my_operational_intent_reference_helper остаётся None, и уже ПОСЛЕ
+        # успешного ответа DSS (201 Accepted) воркер падал на
+        #   AttributeError: 'NoneType' object has no attribute
+        #   'generate_bounds_altitude_time_for_volumes'
+        # то есть объявление до DSS доходило, а состояние в БД не
+        # фиксировалось. Класс объявлен выше в этом же модуле.
+        operational_intents_converter=OperationalIntentsConverter(),
     )
     return await my_dss_opint_creator.submit_flight_declaration_to_dss()
 

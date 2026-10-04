@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,6 +52,25 @@ class FlightBlenderSettings(BaseSettings):
     FLIGHTBLENDER_FQDN: str = "http://flight-blender:8000"
     UTM_ZONE: str = "54N"
     AUTO_SUBMIT_TO_DSS: bool = True
+    @field_validator("DSS_BASE_URL")
+    @classmethod
+    def _dss_base_url_trailing_slash(cls, v: str) -> str:
+        # Клиенты DSS склеивают URL конкатенацией без разделителя
+        # (dss_base_url + "dss/v1/..."), поэтому слэш обязателен.
+        # Без него httpx получает порт "8082dss" -> InvalidURL.
+        # Заглушку "0" и пустое значение не трогаем.
+        if not v or v == "0":
+            return v
+        return v if v.endswith("/") else v + "/"
+
+    @field_validator("DSS_SELF_AUDIENCE")
+    @classmethod
+    def _dss_self_audience_trailing_slash(cls, v: str) -> str:
+        # Тот же контракт для собственного audience USS.
+        if not v or v == "0":
+            return v
+        return v if v.endswith("/") else v + "/"
+
 
     # ── Surveillance / heartbeat ───────────────────────────────────────────
     HEARTBEAT_RATE_SECS: int = 5
