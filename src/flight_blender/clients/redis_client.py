@@ -13,6 +13,34 @@ from flight_blender.domain_types.surveillance import ActiveTrack
 AIR_TRAFFIC_STREAM_TTL_MS = settings.AIR_TRAFFIC_STREAM_TTL_MS
 
 
+# ── Среда (env) ────────────────────────────────────────────────────────────
+# Допустимые среды. Гибридный аппарат (воздух-вода) принадлежит нескольким
+# средам сразу, поэтому env — строка со списком через запятую: 'air,water'.
+# Порядок сохраняем, дубликаты убираем, неизвестные значения отбрасываем.
+_ENV_VALUES = ("air", "water", "land")
+_ENV_DEFAULT = "air"
+
+
+def _normalize_env(value) -> str:
+    """Приводит env к строке из набора {air,water,land}.
+
+    None/пусто -> 'air' (обратная совместимость: все старые наблюдения
+    без env считаются воздушными). Список -> отсортированный по канону
+    набор без дублей. Неизвестные значения отбрасываются; если не осталось
+    ни одного известного — возвращается 'air'.
+    """
+    if value is None:
+        return _ENV_DEFAULT
+    if isinstance(value, (list, tuple, set)):
+        parts = [str(v).strip().lower() for v in value]
+    else:
+        parts = [p.strip().lower() for p in str(value).replace(";", ",").split(",")]
+    seen = [v for v in _ENV_VALUES if v in parts]   # канонический порядок
+    if not seen:
+        return _ENV_DEFAULT
+    return ",".join(seen)
+
+
 class RedisStreamOperations:
     """This module manages the redis entries to the flight stream, it is used to create the stream, add data to it, and read from it."""
 
@@ -396,6 +424,8 @@ class RedisStreamOperations:
                 altitude_mm=float(field_data.get("altitude_mm", 0.0)),
                 traffic_source=int(field_data.get("traffic_source", 0)),
                 source_type=int(field_data.get("source_type", 0)),
+                # Среда приходит строкой; нормализуем к набору {air,water,land}
+                env=_normalize_env(field_data.get("env")),
                 icao_address=str(field_data.get("icao_address", "")),
                 timestamp=int(field_data.get("timestamp", 0)),
                 metadata=metadata,

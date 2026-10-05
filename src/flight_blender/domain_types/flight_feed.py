@@ -37,6 +37,10 @@ class FlightObservationSchema:
     updated_at: str
 
     metadata: dict
+    # Среда. ВАЖНО: это ИМЕННО тот класс, который импортирует
+    # services/flight_feed_svc.py. Поле с дефолтом идёт ПОСЛЕ полей
+    # без дефолтов, иначе dataclass не импортируется. Поэтому env — последним.
+    env: str = 'air'
 
 
 @dataclass
@@ -51,6 +55,10 @@ class SingleAirtrafficObservation:
     metadata: dict = field(default_factory=dict)
     session_id: str | None = ""
     ingested_at_ms: int = 0
+    # Среда: 'air' | 'water' | 'land' | комбинация 'air,water' (гибрид).
+    # ВАЖНО: поле с дефолтом идёт ПОСЛЕ полей без дефолтов, иначе
+    # dataclass не импортируется. Поэтому env — последним.
+    env: str = 'air'
 
 
 @dataclass

@@ -46,6 +46,7 @@ class SQLAlchemyFlightFeedRepository:
             altitude_mm=single_observation.altitude_mm,
             traffic_source=single_observation.traffic_source,
             source_type=single_observation.source_type,
+            env=getattr(single_observation, "env", None) or "air",
             icao_address=single_observation.icao_address,
             raw_metadata=json.dumps(single_observation.metadata),
             sensor_timestamp=sensor_timestamp,
@@ -66,6 +67,7 @@ class SQLAlchemyFlightFeedRepository:
                     altitude_mm=o.altitude_mm,
                     traffic_source=o.traffic_source,
                     source_type=o.source_type,
+                    env=getattr(o, "env", None) or "air",
                     icao_address=o.icao_address,
                     raw_metadata=json.dumps(o.metadata),
                 )
@@ -205,6 +207,7 @@ class SQLAlchemyFlightFeedRepository:
                 "altitude_mm": row.altitude_mm,
                 "traffic_source": row.traffic_source,
                 "source_type": row.source_type,
+                "env": getattr(row, "env", None) or "air",
                 "icao_address": row.icao_address,
                 "created_at": row.created_at.isoformat(),
                 "updated_at": row.updated_at.isoformat(),

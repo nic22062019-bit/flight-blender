@@ -15,6 +15,8 @@ class ObservationIn(BaseModel):
     traffic_source: int
     timestamp: int
     source_type: int = 0
+    # Среда: 'air' | 'water' | 'land' | комбинация 'air,water'
+    env: str = 'air'
     metadata: dict = Field(default_factory=dict)
 
 
@@ -37,6 +39,10 @@ class FlightObservationSchema:
     updated_at: str
 
     metadata: dict
+    # Среда. ВАЖНО: поле с дефолтом обязано идти ПОСЛЕ полей без
+    # дефолтов, иначе dataclass не импортируется ('non-default argument
+    # follows default argument'). Поэтому env — последним.
+    env: str = 'air'
 
 
 @dataclass
@@ -51,6 +57,10 @@ class SingleAirtrafficObservation:
     metadata: dict = field(default_factory=dict)
     session_id: str | None = ""
     ingested_at_ms: int = 0
+    # Среда: 'air' | 'water' | 'land' | комбинация 'air,water' (гибрид).
+    # ВАЖНО: поле с дефолтом идёт ПОСЛЕ полей без дефолтов, иначе
+    # dataclass не импортируется. Поэтому env — последним.
+    env: str = 'air'
 
 
 @dataclass
@@ -67,6 +77,7 @@ class ObservationSchema(Schema):
     traffic_source = ma_fields.Integer(required=True)
     timestamp = ma_fields.Integer(required=True)
     source_type = ma_fields.Integer(required=False)
+    env = ma_fields.String(required=False, load_default='air', allow_none=True)
     metadata = ma_fields.Dict(required=False)
 
 

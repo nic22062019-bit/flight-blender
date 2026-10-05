@@ -17,6 +17,10 @@ class FlightObservationORM(Base):
     altitude_mm: Mapped[float] = mapped_column(Float, nullable=False)
     traffic_source: Mapped[int] = mapped_column(Integer, nullable=False)
     source_type: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Среда (air|water|land). Для гибридных аппаратов (воздух-вода)
+    # хранится список через запятую: 'air,water'. По умолчанию 'air' —
+    # обратная совместимость со всеми существующими наблюдениями.
+    env: Mapped[str] = mapped_column(String(32), nullable=False, default='air')
     icao_address: Mapped[str] = mapped_column(Text, nullable=False)
     raw_metadata: Mapped[str] = mapped_column("metadata", Text, nullable=False)
     sensor_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
