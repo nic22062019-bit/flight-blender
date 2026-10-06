@@ -158,6 +158,7 @@ class FlightFeedOperations:
                 icao_address=icao_address,
                 metadata=obs.metadata,
                 session_id=obs.session_id,
+            env=obs.env,
             )
             all_traffic.append(asdict(so))
 
