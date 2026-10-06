@@ -13,8 +13,11 @@ class GeoFenceORM(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     raw_geo_fence: Mapped[str | None] = mapped_column(Text, nullable=True)
     geozone: Mapped[str | None] = mapped_column(Text, nullable=True)
-    upper_limit: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
-    lower_limit: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    # 2026-10-06: numeric(8,2) — max 999999.99 м (эшелоны FL760 = 23164.8 м
+    # влезают). ALTER в прод-БД применён по решению владельца, бэкап:
+    # /home/nick/db_backup_20261006/geofence_pre_alter_20261006_evening.sql
+    upper_limit: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
+    lower_limit: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
     altitude_ref: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     bounds: Mapped[str] = mapped_column(String(140), nullable=False)
